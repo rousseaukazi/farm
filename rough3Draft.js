@@ -33,22 +33,34 @@ scene.add(directionalLight);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-// GLTF Loader
+// Track selected model and animation states
+let selectedModel = null;
+const modelStates = new Map(); // Store animation states for each model
+
+// GLTF Loader for first model (pig)
 const loader = new GLTFLoader();
-let mixer; // Will be used for animations
-let model; // Declare model globally
-
 loader.load(
-    './pigColorDancing.glb', // Replace with your model path
+    './pigColorDancing.glb',
     function (gltf) {
-        model = gltf.scene; // Assign to global model variable
+        const model = gltf.scene;
         scene.add(model);
+        
+        // Make model clickable
+        model.userData.type = 'selectable';
+        model.userData.id = 'pig';
 
-        // If your model has animations
+        // Store model state
+        modelStates.set(model, {
+            mixer: null,
+            isPlaying: true
+        });
+
+        // Setup animations
         if (gltf.animations.length) {
-            mixer = new THREE.AnimationMixer(model);
+            const mixer = new THREE.AnimationMixer(model);
             const animation = mixer.clipAction(gltf.animations[0]);
             animation.play();
+            modelStates.get(model).mixer = mixer;
         }
     },
     function (xhr) {
@@ -59,20 +71,58 @@ loader.load(
     }
 );
 
+// Load duck model
+console.log('Attempting to load duck...'); // Add this debug line
+
+// First attempt with original path
+loader.load(
+    './duckColorFlip.glb',
+    onLoad,
+    undefined,
+    onError
+);
+
 // Animation clock
 const clock = new THREE.Clock();
 
-// Render loop
+// Add click handling
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+window.addEventListener('click', (event) => {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
+
+    for (const intersect of intersects) {
+        let object = intersect.object;
+        // Traverse up to find the root model
+        while (object.parent && !object.userData.type) {
+            object = object.parent;
+        }
+        
+        if (object.userData.type === 'selectable') {
+            selectedModel = object;
+            console.log('Selected:', object.userData.id);
+            break;
+        }
+    }
+});
+
+// Update animation loop
 function animate() {
     requestAnimationFrame(animate);
-    
-    // Update controls
     controls.update();
 
-    // Update animations if any
-    if (mixer) {
-        mixer.update(clock.getDelta());
-    }
+    const delta = clock.getDelta();
+    // Update all animations
+    modelStates.forEach((state, model) => {
+        if (state.mixer) {
+            state.mixer.update(delta);
+        }
+    });
 
     renderer.render(scene, camera);
 }
@@ -89,48 +139,70 @@ function onWindowResize() {
 // Start animation loop
 animate();
 
-// Track animation state
-let isPlaying = true;
-
-// Handle keyboard controls
+// Update keyboard controls
 document.addEventListener('keydown', (event) => {
+    if (!selectedModel) return;
+    
     const moveSpeed = 0.1;
+    const modelState = modelStates.get(selectedModel);
     
     switch(event.key) {
         case 'ArrowLeft':
-            // Move model left
-            model.position.x -= moveSpeed;
+            selectedModel.position.x -= moveSpeed;
             break;
         case 'ArrowRight':
-            // Move model right 
-            model.position.x += moveSpeed;
+            selectedModel.position.x += moveSpeed;
             break;
         case 'ArrowUp':
-            // Move model up
-            model.position.y += moveSpeed;
+            selectedModel.position.y += moveSpeed;
             break;
         case 'ArrowDown':
-            // Move model down
-            model.position.y -= moveSpeed;
+            selectedModel.position.y -= moveSpeed;
             break;
         case ' ':
-            // Toggle animation play/pause
-            if (mixer) {
-                isPlaying = !isPlaying;
-                mixer.timeScale = isPlaying ? 1 : 0;
+            if (modelState.mixer) {
+                modelState.isPlaying = !modelState.isPlaying;
+                modelState.mixer.timeScale = modelState.isPlaying ? 1 : 0;
             }
             break;
         case 'r':
         case 'R':
-            // Reset animation
-            if (mixer) {
-                mixer.setTime(0);
-                if (!isPlaying) {
-                    isPlaying = true;
-                    mixer.timeScale = 1;
+            if (modelState.mixer) {
+                modelState.mixer.setTime(0);
+                if (!modelState.isPlaying) {
+                    modelState.isPlaying = true;
+                    modelState.mixer.timeScale = 1;
                 }
             }
             break;
     }
 });
+
+function onLoad(gltf) {
+    const model = gltf.scene;
+    model.position.x = 3;
+    model.position.y = 0;
+    model.position.z = 0;
+    
+    scene.add(model);
+    
+    model.userData.type = 'selectable';
+    model.userData.id = 'duck';
+
+    modelStates.set(model, {
+        mixer: null,
+        isPlaying: true
+    });
+
+    if (gltf.animations.length) {
+        const mixer = new THREE.AnimationMixer(model);
+        const animation = mixer.clipAction(gltf.animations[0]);
+        animation.play();
+        modelStates.get(model).mixer = mixer;
+    }
+}
+
+function onError(error) {
+    console.error('An error occurred loading the model:', error);
+}
 
